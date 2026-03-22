@@ -1,34 +1,32 @@
 package com.sonesh.finance.service;
 
-import java.io.UnsupportedEncodingException;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
-import org.springframework.mail.javamail.JavaMailSender;
-import org.springframework.mail.javamail.MimeMessageHelper;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestTemplate;
 
 import com.sonesh.finance.dto.RegisterRequest;
 import com.sonesh.finance.model.User;
 import com.sonesh.finance.repository.UserRepository;
-
-import jakarta.mail.MessagingException;
-import jakarta.mail.internet.MimeMessage;
 
 @Service
 public class UserService {
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
-    private final JavaMailSender mailSender;
+    private final RestTemplate restTemplate = new RestTemplate();
 
     public UserService(UserRepository userRepository,
-                       PasswordEncoder passwordEncoder,
-                       JavaMailSender mailSender) {
+                       PasswordEncoder passwordEncoder) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
-        this.mailSender = mailSender;
     }
 
     public User register(RegisterRequest request) {
@@ -59,20 +57,59 @@ public class UserService {
         userRepository.save(user);
 
         String resetLink = "https://fintrack-frontend-rs0r.onrender.com/reset-password?token=" + token;
-
         String htmlContent = buildResetPasswordEmail(user.getName(), resetLink);
 
         try {
-            MimeMessage message = mailSender.createMimeMessage();
-            MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
+            String apiKey = System.getenv("BREVO_API_KEY");
+            if (apiKey == null || apiKey.isBlank()) {
+                throw new RuntimeException("BREVO_API_KEY is missing");
+            }
 
-            helper.setFrom(System.getenv("MAIL_USERNAME"), "FinTrack");
-            helper.setTo(user.getEmail());
-            helper.setSubject("Reset your FinTrack password");
-            helper.setText(htmlContent, true);
+            String url = "https://api.brevo.com/v3/smtp/email";
 
-            mailSender.send(message);
-        } catch (MessagingException | UnsupportedEncodingException e) {
+            String escapedHtml = htmlContent
+                    .replace("\\", "\\\\")
+                    .replace("\"", "\\\"")
+                    .replace("\n", "\\n")
+                    .replace("\r", "");
+
+            String escapedName = user.getName().replace("\"", "\\\"");
+
+            String requestBody = """
+            {
+              "sender": {
+                "name": "FinTrack",
+                "email": "fintrack.app.official@gmail.com"
+              },
+              "to": [
+                {
+                  "email": "%s",
+                  "name": "%s"
+                }
+              ],
+              "subject": "Reset your FinTrack password",
+              "htmlContent": "%s"
+            }
+            """.formatted(user.getEmail(), escapedName, escapedHtml);
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            headers.set("api-key", apiKey);
+
+            HttpEntity<String> entity = new HttpEntity<>(requestBody, headers);
+
+            ResponseEntity<String> response = restTemplate.exchange(
+                    url,
+                    HttpMethod.POST,
+                    entity,
+                    String.class
+            );
+
+            if (!response.getStatusCode().is2xxSuccessful()) {
+                throw new RuntimeException("Brevo API failed: " + response.getBody());
+            }
+
+        } catch (RuntimeException e) {
             throw new RuntimeException("Failed to send email", e);
         }
     }
@@ -97,7 +134,6 @@ public class UserService {
     }
 
     private String buildResetPasswordEmail(String name, String resetLink) {
-
         return """
         <!DOCTYPE html>
         <html lang="en">
@@ -111,25 +147,18 @@ public class UserService {
             <table width="100%%" style="padding:32px 0;background:#0b1020;">
               <tr>
                 <td align="center">
-
                   <table width="100%%" style="max-width:640px;background:#11182f;border-radius:24px;border:1px solid rgba(255,255,255,0.08);overflow:hidden;">
-
-                    <!-- HEADER -->
                     <tr>
                       <td style="padding:32px;">
                         <table>
                           <tr>
-
-                            <!-- LOGO (NO IMAGE NEEDED) -->
                             <td style="width:56px;height:56px;border-radius:16px;background:linear-gradient(135deg,#22c55e,#14b8a6,#0ea5e9);text-align:center;font-size:20px;font-weight:800;color:white;">
                               FT
                             </td>
-
                             <td style="padding-left:14px;">
                               <div style="font-size:24px;font-weight:700;">FinTrack</div>
                               <div style="font-size:12px;color:#94a3b8;">Premium Finance OS</div>
                             </td>
-
                           </tr>
                         </table>
 
@@ -146,7 +175,6 @@ public class UserService {
                       </td>
                     </tr>
 
-                    <!-- BUTTON -->
                     <tr>
                       <td align="center" style="padding:20px;">
                         <a href="%s"
@@ -157,7 +185,6 @@ public class UserService {
                       </td>
                     </tr>
 
-                    <!-- LINK -->
                     <tr>
                       <td style="padding:0 32px 20px 32px;">
                         <div style="font-size:12px;color:#94a3b8;">
@@ -169,7 +196,6 @@ public class UserService {
                       </td>
                     </tr>
 
-                    <!-- FOOTER -->
                     <tr>
                       <td style="padding:24px;text-align:center;font-size:12px;color:#64748b;">
                         FinTrack • Secure Finance System
@@ -177,7 +203,6 @@ public class UserService {
                     </tr>
 
                   </table>
-
                 </td>
               </tr>
             </table>
@@ -185,8 +210,9 @@ public class UserService {
         </html>
         """.formatted(name, resetLink, resetLink);
     }
+
     public User getUserByEmail(String email) {
         return userRepository.findByEmail(email.trim().toLowerCase())
                 .orElseThrow(() -> new RuntimeException("User not found"));
     }
-} 
+}
