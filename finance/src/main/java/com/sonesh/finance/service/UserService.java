@@ -66,7 +66,7 @@ public class UserService {
             MimeMessage message = mailSender.createMimeMessage();
             MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
 
-            helper.setFrom("fintrack.app.official@gmail.com", "FinTrack");
+            helper.setFrom(System.getenv("MAIL_USERNAME"), "FinTrack");
             helper.setTo(user.getEmail());
             helper.setSubject("Reset your FinTrack password");
             helper.setText(htmlContent, true);
