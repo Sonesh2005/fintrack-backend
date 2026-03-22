@@ -47,8 +47,7 @@ public class SecurityConfig {
                 "http://localhost:5173",
                 "http://localhost:5174",
                 "http://localhost:3000",
-                "https://*.vercel.app",
-                "https://*.onrender.com"
+                "https://fintrack-frontend-rs0r.onrender.com"
         ));
 
         config.setAllowedMethods(List.of(
