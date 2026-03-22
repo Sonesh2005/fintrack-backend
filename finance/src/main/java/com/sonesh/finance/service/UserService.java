@@ -1,32 +1,29 @@
 package com.sonesh.finance.service;
 
-import java.time.LocalDateTime;
-import java.util.UUID;
-
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpMethod;
-import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
-import org.springframework.security.crypto.password.PasswordEncoder;
-import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestTemplate;
-
 import com.sonesh.finance.dto.RegisterRequest;
 import com.sonesh.finance.model.User;
 import com.sonesh.finance.repository.UserRepository;
+import org.springframework.mail.SimpleMailMessage;
+import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.stereotype.Service;
+
+import java.time.LocalDateTime;
+import java.util.UUID;
 
 @Service
 public class UserService {
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
-    private final RestTemplate restTemplate = new RestTemplate();
+    private final JavaMailSender mailSender;
 
     public UserService(UserRepository userRepository,
-                       PasswordEncoder passwordEncoder) {
+                       PasswordEncoder passwordEncoder,
+                       JavaMailSender mailSender) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
+        this.mailSender = mailSender;
     }
 
     public User register(RegisterRequest request) {
@@ -56,62 +53,20 @@ public class UserService {
         user.setResetTokenExpiry(LocalDateTime.now().plusMinutes(15));
         userRepository.save(user);
 
-        String resetLink = "https://fintrack-frontend-rs0r.onrender.com/reset-password?token=" + token;
-        String htmlContent = buildResetPasswordEmail(user.getName(), resetLink);
+        String resetLink = "http://localhost:5173/reset-password?token=" + token;
 
-        try {
-            String apiKey = System.getenv("BREVO_API_KEY");
-            if (apiKey == null || apiKey.isBlank()) {
-                throw new RuntimeException("BREVO_API_KEY is missing");
-            }
+        SimpleMailMessage message = new SimpleMailMessage();
+        message.setTo(user.getEmail());
+        message.setSubject("Reset your FinTrack password");
+        message.setText(
+                "Hello " + user.getName() + ",\n\n" +
+                        "Click the link below to reset your password:\n" +
+                        resetLink + "\n\n" +
+                        "This link will expire in 15 minutes.\n\n" +
+                        "If you did not request this, please ignore this email."
+        );
 
-            String url = "https://api.brevo.com/v3/smtp/email";
-
-            String escapedHtml = htmlContent
-                    .replace("\\", "\\\\")
-                    .replace("\"", "\\\"")
-                    .replace("\n", "\\n")
-                    .replace("\r", "");
-
-            String escapedName = user.getName().replace("\"", "\\\"");
-
-            String requestBody = """
-            {
-              "sender": {
-                "name": "FinTrack",
-                "email": "fintrack.app.official@gmail.com"
-              },
-              "to": [
-                {
-                  "email": "%s",
-                  "name": "%s"
-                }
-              ],
-              "subject": "Reset your FinTrack password",
-              "htmlContent": "%s"
-            }
-            """.formatted(user.getEmail(), escapedName, escapedHtml);
-
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
-            headers.set("api-key", apiKey);
-
-            HttpEntity<String> entity = new HttpEntity<>(requestBody, headers);
-
-            ResponseEntity<String> response = restTemplate.exchange(
-                    url,
-                    HttpMethod.POST,
-                    entity,
-                    String.class
-            );
-
-            if (!response.getStatusCode().is2xxSuccessful()) {
-                throw new RuntimeException("Brevo API failed: " + response.getBody());
-            }
-
-        } catch (RuntimeException e) {
-            throw new RuntimeException("Failed to send email", e);
-        }
+        mailSender.send(message);
     }
 
     public void resetPassword(String token, String newPassword, String confirmPassword) {
@@ -131,84 +86,6 @@ public class UserService {
         user.setResetTokenExpiry(null);
 
         userRepository.save(user);
-    }
-
-    private String buildResetPasswordEmail(String name, String resetLink) {
-        return """
-        <!DOCTYPE html>
-        <html lang="en">
-          <head>
-            <meta charset="UTF-8" />
-            <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-            <title>Reset your FinTrack password</title>
-          </head>
-
-          <body style="margin:0;padding:0;background:#0b1020;font-family:Arial,Helvetica,sans-serif;color:#ffffff;">
-            <table width="100%%" style="padding:32px 0;background:#0b1020;">
-              <tr>
-                <td align="center">
-                  <table width="100%%" style="max-width:640px;background:#11182f;border-radius:24px;border:1px solid rgba(255,255,255,0.08);overflow:hidden;">
-                    <tr>
-                      <td style="padding:32px;">
-                        <table>
-                          <tr>
-                            <td style="width:56px;height:56px;border-radius:16px;background:linear-gradient(135deg,#22c55e,#14b8a6,#0ea5e9);text-align:center;font-size:20px;font-weight:800;color:white;">
-                              FT
-                            </td>
-                            <td style="padding-left:14px;">
-                              <div style="font-size:24px;font-weight:700;">FinTrack</div>
-                              <div style="font-size:12px;color:#94a3b8;">Premium Finance OS</div>
-                            </td>
-                          </tr>
-                        </table>
-
-                        <div style="margin-top:24px;font-size:12px;color:#67e8f9;font-weight:600;">
-                          PASSWORD SECURITY
-                        </div>
-
-                        <h1 style="margin:10px 0;font-size:28px;">Reset your password</h1>
-
-                        <p style="color:#cbd5f5;font-size:14px;">
-                          Hello %s,<br/><br/>
-                          We received a request to reset your FinTrack password.
-                        </p>
-                      </td>
-                    </tr>
-
-                    <tr>
-                      <td align="center" style="padding:20px;">
-                        <a href="%s"
-                           style="padding:14px 28px;background:linear-gradient(90deg,#22c55e,#0ea5e9);
-                                  border-radius:12px;color:white;text-decoration:none;font-weight:bold;">
-                          Reset Password
-                        </a>
-                      </td>
-                    </tr>
-
-                    <tr>
-                      <td style="padding:0 32px 20px 32px;">
-                        <div style="font-size:12px;color:#94a3b8;">
-                          Or copy this link:
-                        </div>
-                        <div style="margin-top:8px;font-size:12px;color:#60a5fa;">
-                          %s
-                        </div>
-                      </td>
-                    </tr>
-
-                    <tr>
-                      <td style="padding:24px;text-align:center;font-size:12px;color:#64748b;">
-                        FinTrack • Secure Finance System
-                      </td>
-                    </tr>
-
-                  </table>
-                </td>
-              </tr>
-            </table>
-          </body>
-        </html>
-        """.formatted(name, resetLink, resetLink);
     }
 
     public User getUserByEmail(String email) {
