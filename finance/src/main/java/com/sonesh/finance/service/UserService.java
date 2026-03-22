@@ -1,17 +1,20 @@
 package com.sonesh.finance.service;
 
-import com.sonesh.finance.dto.RegisterRequest;
-import com.sonesh.finance.model.User;
-import com.sonesh.finance.repository.UserRepository;
-import jakarta.mail.MessagingException;
-import jakarta.mail.internet.MimeMessage;
+import java.io.UnsupportedEncodingException;
+import java.time.LocalDateTime;
+import java.util.UUID;
+
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
-import java.time.LocalDateTime;
-import java.util.UUID;
+import com.sonesh.finance.dto.RegisterRequest;
+import com.sonesh.finance.model.User;
+import com.sonesh.finance.repository.UserRepository;
+
+import jakarta.mail.MessagingException;
+import jakarta.mail.internet.MimeMessage;
 
 @Service
 public class UserService {
@@ -55,7 +58,7 @@ public class UserService {
         user.setResetTokenExpiry(LocalDateTime.now().plusMinutes(15));
         userRepository.save(user);
 
-        String resetLink = "http://localhost:5173/reset-password?token=" + token;
+        String resetLink = "https://fintrack-frontend-rs0r.onrender.com/reset-password?token=" + token;
 
         String htmlContent = buildResetPasswordEmail(user.getName(), resetLink);
 
@@ -69,10 +72,8 @@ public class UserService {
             helper.setText(htmlContent, true);
 
             mailSender.send(message);
-        } catch (MessagingException e) {
+        } catch (MessagingException | UnsupportedEncodingException e) {
             throw new RuntimeException("Failed to send email", e);
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to prepare email", e);
         }
     }
 
@@ -188,4 +189,4 @@ public class UserService {
         return userRepository.findByEmail(email.trim().toLowerCase())
                 .orElseThrow(() -> new RuntimeException("User not found"));
     }
-}
+} 
