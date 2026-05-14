@@ -1,14 +1,21 @@
 package com.sonesh.finance.service;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lowagie.text.*;
 import com.lowagie.text.pdf.PdfPTable;
 import com.lowagie.text.pdf.PdfWriter;
 import com.sonesh.finance.repository.ExpenseRepository;
 import com.sonesh.finance.repository.IncomeRepository;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
+import org.springframework.web.reactive.function.client.WebClient;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.util.Map;
 
 @Service
 public class ReportService {
@@ -16,69 +23,235 @@ public class ReportService {
     private final IncomeRepository incomeRepository;
     private final ExpenseRepository expenseRepository;
 
+    @Value("${openrouter.api.key}")
+    private String apiKey;
+
+    private final WebClient webClient = WebClient.create();
+
     public ReportService(IncomeRepository incomeRepository,
                          ExpenseRepository expenseRepository) {
+
         this.incomeRepository = incomeRepository;
         this.expenseRepository = expenseRepository;
     }
 
-    public ByteArrayInputStream generateMonthlyReport(String email, int year, int month) {
+    public ByteArrayInputStream generateMonthlyReport(String email,
+                                                      int year,
+                                                      int month) {
 
-        double income = incomeRepository.getMonthlyIncomeTotal(email, year, month);
-        double expense = expenseRepository.getMonthlyExpenseTotal(email, year, month);
+        double income =
+                incomeRepository.getMonthlyIncomeTotal(email, year, month);
+
+        double expense =
+                expenseRepository.getMonthlyExpenseTotal(email, year, month);
+
         double savings = income - expense;
 
+        String aiInsights =
+                generateAIInsights(income, expense, savings);
+
         Document document = new Document();
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
+
+        ByteArrayOutputStream out =
+                new ByteArrayOutputStream();
 
         try {
 
             PdfWriter.getInstance(document, out);
+
             document.open();
 
-            Font titleFont = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 20);
-            Font headerFont = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 14);
-            Font textFont = FontFactory.getFont(FontFactory.HELVETICA, 12);
+            Font titleFont =
+                    FontFactory.getFont(
+                            FontFactory.HELVETICA_BOLD,
+                            20
+                    );
 
-            // Title
-            Paragraph title = new Paragraph("FinTrack - Monthly Financial Report", titleFont);
+            Font headerFont =
+                    FontFactory.getFont(
+                            FontFactory.HELVETICA_BOLD,
+                            14
+                    );
+
+            Font textFont =
+                    FontFactory.getFont(
+                            FontFactory.HELVETICA,
+                            12
+                    );
+
+            // TITLE
+
+            Paragraph title =
+                    new Paragraph(
+                            "FinTrack - AI Monthly Financial Report",
+                            titleFont
+                    );
+
             title.setAlignment(Element.ALIGN_CENTER);
+
             document.add(title);
 
             document.add(new Paragraph(" "));
 
-            // User details
-            document.add(new Paragraph("User: " + email, textFont));
-            document.add(new Paragraph("Year: " + year + " | Month: " + month, textFont));
+            // USER DETAILS
+
+            document.add(
+                    new Paragraph(
+                            "User: " + email,
+                            textFont
+                    )
+            );
+
+            document.add(
+                    new Paragraph(
+                            "Year: " + year + " | Month: " + month,
+                            textFont
+                    )
+            );
 
             document.add(new Paragraph(" "));
-            document.add(new Paragraph("Financial Summary", headerFont));
+
+            // FINANCIAL SUMMARY
+
+            document.add(
+                    new Paragraph(
+                            "Financial Summary",
+                            headerFont
+                    )
+            );
+
             document.add(new Paragraph(" "));
 
-            // Table
             PdfPTable table = new PdfPTable(2);
+
             table.setWidthPercentage(100);
 
             table.addCell("Total Income");
-            table.addCell("Rs. " + String.format("%.2f", income));
+            table.addCell(
+                    "Rs. " + String.format("%.2f", income)
+            );
 
             table.addCell("Total Expense");
-            table.addCell("Rs. " + String.format("%.2f", expense));
+            table.addCell(
+                    "Rs. " + String.format("%.2f", expense)
+            );
 
             table.addCell("Savings");
-            table.addCell("Rs. " + String.format("%.2f", savings));
+            table.addCell(
+                    "Rs. " + String.format("%.2f", savings)
+            );
 
             document.add(table);
 
             document.add(new Paragraph(" "));
-            document.add(new Paragraph("Generated by FinTrack - Personal Finance Management System", textFont));
+
+            // AI INSIGHTS
+
+            document.add(
+                    new Paragraph(
+                            "AI Financial Insights",
+                            headerFont
+                    )
+            );
+
+            document.add(new Paragraph(" "));
+
+            Paragraph aiParagraph =
+                    new Paragraph(aiInsights, textFont);
+
+            document.add(aiParagraph);
+
+            document.add(new Paragraph(" "));
+
+            // FOOTER
+
+            document.add(
+                    new Paragraph(
+                            "Generated by FinTrack AI Financial Management System",
+                            textFont
+                    )
+            );
 
             document.close();
 
         } catch (Exception e) {
+
             e.printStackTrace();
         }
 
-        return new ByteArrayInputStream(out.toByteArray());
+        return new ByteArrayInputStream(
+                out.toByteArray()
+        );
+    }
+
+    private String generateAIInsights(double income,
+                                      double expense,
+                                      double savings) {
+
+        String prompt = """
+                You are a professional financial advisor.
+
+                Analyze this financial data and provide:
+                - spending analysis
+                - savings analysis
+                - financial risks
+                - improvement suggestions
+
+                Keep the response concise and professional.
+
+                Financial Data:
+
+                Income: %s
+                Expenses: %s
+                Savings: %s
+                """.formatted(
+                income,
+                expense,
+                savings
+        );
+
+        Map<String, Object> body = Map.of(
+                "model", "deepseek/deepseek-chat",
+                "messages", new Object[]{
+                        Map.of(
+                                "role", "user",
+                                "content", prompt
+                        )
+                }
+        );
+
+        try {
+
+            String response = webClient.post()
+                    .uri("https://openrouter.ai/api/v1/chat/completions")
+                    .header(
+                            HttpHeaders.AUTHORIZATION,
+                            "Bearer " + apiKey
+                    )
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .bodyValue(body)
+                    .retrieve()
+                    .bodyToMono(String.class)
+                    .block();
+
+            ObjectMapper mapper =
+                    new ObjectMapper();
+
+            JsonNode root =
+                    mapper.readTree(response);
+
+            return root
+                    .get("choices")
+                    .get(0)
+                    .get("message")
+                    .get("content")
+                    .asText();
+
+        } catch (Exception e) {
+
+            e.printStackTrace();
+
+            return "AI insights unavailable.";
+        }
     }
 }

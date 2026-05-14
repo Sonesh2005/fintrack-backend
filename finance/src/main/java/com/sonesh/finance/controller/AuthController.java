@@ -34,21 +34,46 @@ public class AuthController {
     @PostMapping("/register")
     public ResponseEntity<MessageResponse> register(@Valid @RequestBody RegisterRequest request) {
         userService.register(request);
-        return ResponseEntity.ok(new MessageResponse("User registered successfully"));
+        return ResponseEntity.ok(
+                new MessageResponse("Registration successful. Please verify your email before logging in.")
+        );
     }
 
+    @GetMapping("/verify-email")
+    public ResponseEntity<MessageResponse> verifyEmail(@RequestParam String token) {
+        userService.verifyEmail(token);
+        return ResponseEntity.ok(new MessageResponse("Email verified successfully. You can now log in."));
+    }
 
     @PostMapping("/login")
-    public ResponseEntity<AuthResponse> login(@Valid @RequestBody LoginRequest req) {
+    public ResponseEntity<MessageResponse> login(@Valid @RequestBody LoginRequest req) {
+
+        User user = userService.getUserByEmail(req.email);
+
+        if (!user.isEmailVerified()) {
+            throw new RuntimeException("Please verify your email before logging in");
+        }
 
         authenticationManager.authenticate(
                 new UsernamePasswordAuthenticationToken(req.email, req.password)
         );
 
-        String token = jwtService.generateToken(req.email);
+        // ✅ Send OTP
+        userService.sendLoginOtp(req.email);
 
-        // 🔥 fetch user details
-        User user = userService.getUserByEmail(req.email);
+        return ResponseEntity.ok(
+                new MessageResponse("OTP sent to your email")
+        );
+    }
+    @PostMapping("/verify-login-otp")
+    public ResponseEntity<AuthResponse> verifyLoginOtp(
+            @RequestParam String email,
+            @RequestParam String otp
+    ) {
+
+        User user = userService.verifyLoginOtp(email, otp);
+
+        String token = jwtService.generateToken(user.getEmail());
 
         return ResponseEntity.ok(
                 new AuthResponse(
